@@ -1,110 +1,106 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import './index.css';
+import React, { useState, useCallback } from 'react';
+import { useWebSocket } from './hooks/useWebSocket';
+import { useSendEvent } from './hooks/useSendEvent';
+import { deepClone } from './utils/helpers';
+import { ConnectionStatus, ErrorBanner } from './components/Common';
+import { EventForm } from './components/EventForm';
+import { EventFeed } from './components/EventFeed';
 
 function App() {
   const [events, setEvents] = useState([]);
-  const [message, setMessage] = useState('');
   const [error, setError] = useState(null);
-  const [connected, setConnected] = useState(false);
-  const wsRef = useRef(null);
-  const reconnectTimeoutRef = useRef(null);
+  const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  const { sendEvent } = useSendEvent();
 
-  const connectWebSocket = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      return;
-    }
-
-    const ws = new WebSocket('ws://localhost:8000/ws');
-    wsRef.current = ws;
-    setConnected(false);
-
-    ws.onopen = () => {
-      setConnected(true);
-      setError(null);
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const newEvent = JSON.parse(event.data);
-        setEvents(prev => {
-          const entry = { ...newEvent, _clientId: `${Date.now()}-${Math.random()}` };
-          return [entry, ...prev].slice(0, 50);
-        });
-      } catch (e) {
-        setError('Received invalid event data');
-      }
-    };
-
-    ws.onerror = () => {
-      setError('WebSocket error');
-    };
-
-    ws.onclose = () => {
-      setConnected(false);
-      reconnectTimeoutRef.current = setTimeout(connectWebSocket, 3000);
-    };
+  const handleMessage = useCallback((newEvent) => {
+    setEvents((prev) => {
+      const entry = deepClone(newEvent);
+      entry._clientId = `${Date.now()}-${Math.random()}`;
+      return [entry, ...prev].slice(0, 50);
+    });
   }, []);
 
-  useEffect(() => {
-    connectWebSocket();
-    return () => {
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
-  }, [connectWebSocket]);
+  const { connected } = useWebSocket(handleMessage);
 
-  const sendEvent = async (type, payload) => {
-    try {
-      const response = await fetch('http://localhost:8000/events', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type, payload }),
-      });
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`HTTP ${response.status}: ${text}`);
-      }
-    } catch (e) {
-      setError('Failed to send event');
-      console.error(e);
-    }
-  };
+  const handleSend = useCallback(() => {
+    setError(null);
+  }, []);
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    const trimmed = message.trim();
-    if (trimmed) {
-      sendEvent('user_message', { text: trimmed, timestamp: Date.now() });
-      setMessage('');
-      setError(null);
-    }
-  };
+  const filteredEvents = events
+    .filter((ev) => filter === 'all' || ev.type === filter)
+    .filter((ev) => {
+      if (!search.trim()) return true;
+      const q = search.toLowerCase();
+      return (
+        ev.type.toLowerCase().includes(q) ||
+        JSON.stringify(ev.payload).toLowerCase().includes(q)
+      );
+    });
 
   return (
-    <div style={{ padding: 20 }}>
-      <h1>Live Activity Feed</h1>
-      <div>Status: {connected ? 'Connected' : 'Disconnected'}</div>
-      {error && <div style={{ color: 'red' }}>{error}</div>}
-      <form onSubmit={handleSubmit}>
+    <div className="app-container" style={{
+      maxWidth: 720,
+      margin: '0 auto',
+      padding: '24px 16px',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    }}>
+      <div className="header-row" style={{
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: 8,
+        flexWrap: 'wrap',
+        gap: 8,
+      }}>
+        <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>
+          Live Activity Feed
+        </h1>
+        <ConnectionStatus connected={connected} />
+      </div>
+      <ErrorBanner error={error} />
+      <EventForm onSend={handleSend} error={error} setError={setError} />
+      <div className="filter-row" style={{
+        display: 'flex',
+        gap: 8,
+        marginTop: 12,
+        flexWrap: 'wrap',
+        alignItems: 'center',
+      }}>
+        <label style={{ fontSize: 13, color: '#64748b' }}>Filter:</label>
+        {['all', 'user_message', 'system', 'order', 'click'].map((type) => (
+          <button
+            key={type}
+            onClick={() => setFilter(type)}
+            style={{
+              padding: '4px 12px',
+              border: '1px solid #e2e8f0',
+              borderRadius: 999,
+              background: filter === type ? '#2563eb' : '#fff',
+              color: filter === type ? '#fff' : '#334155',
+              fontSize: 12,
+              cursor: 'pointer',
+            }}
+          >
+            {type}
+          </button>
+        ))}
         <input
           type="text"
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          placeholder="Type an event..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search events..."
+          style={{
+            marginLeft: 'auto',
+            padding: '6px 12px',
+            border: '1px solid #e2e8f0',
+            borderRadius: 999,
+            fontSize: 12,
+            minWidth: 140,
+          }}
         />
-        <button type="submit">Send</button>
-      </form>
-      <div style={{ marginTop: 20 }}>
-        {events.map((ev) => (
-          <div key={ev._clientId} style={{ borderBottom: '1px solid #ccc', padding: 8 }}>
-            <strong>{ev.type}</strong> {JSON.stringify(ev.payload)}
-          </div>
-        ))}
       </div>
+      <EventFeed events={filteredEvents} />
     </div>
   );
 }

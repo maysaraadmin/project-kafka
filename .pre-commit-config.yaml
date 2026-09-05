@@ -1,0 +1,22 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-backend
+        name: ruff (backend)
+        entry: ruff check .
+        language: system
+        types: [python]
+        files: ^backend/
+      - id: mypy
+        name: mypy
+        entry: mypy .
+        language: system
+        types: [python]
+        files: ^backend/
+        pass_filenames: []
+      - id: prettier
+        name: prettier
+        entry: prettier --write
+        language: system
+        types: [javascript, jsx, css, json, md]
+        files: ^frontend/|^*.md$

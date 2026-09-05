@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  zookeeper:
+    ports:
+      - "127.0.0.1:2181:2181"
+
+  kafka:
+    ports:
+      - "127.0.0.1:9092:9092"
+    environment:
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+
+  api:
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      CORS_ORIGINS: "https://example.com"
+      JWT_SECRET_KEY: "${JWT_SECRET_KEY}"
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NGINX_CONF: nginx.ssl.conf
+    ports:
+      - "127.0.0.1:3000:80"
+    volumes:
+      - ./frontend/nginx.ssl.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+
+volumes:
+  kafka_data:
+    driver: local

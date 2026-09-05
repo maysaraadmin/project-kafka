@@ -1,0 +1,59 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kafka-dashboard-api"
+version = "0.1.0"
+description = "Real-time activity dashboard API with Kafka and FastAPI"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "fastapi==0.115.0",
+    "uvicorn[standard]==0.30.0",
+    "websockets==12.0",
+    "kafka-python==2.0.2",
+    "pydantic==2.9.0",
+    "pydantic-settings==2.5.0",
+    "slowapi==0.1.9",
+    "limits==3.13.0",
+    "python-dotenv==1.0.1",
+    "structlog==24.4.0",
+    "pyjwt==2.9.0",
+    "python-multipart==0.0.9",
+    "opentelemetry-api==1.27.0",
+    "opentelemetry-sdk==1.27.0",
+    "opentelemetry-instrumentation-fastapi==0.48.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.3.3",
+    "pytest-asyncio==0.24.0",
+    "httpx==0.27.0",
+    "testcontainers==3.7.1",
+    "testcontainers-kafka==0.0.1rc2",
+    "ruff==0.6.9",
+    "mypy==1.11.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["main*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
