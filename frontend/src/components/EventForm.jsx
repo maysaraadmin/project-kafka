@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { useSendEvent } from '../hooks/useSendEvent';
 import { ErrorBanner } from './Common';
 
-export function EventForm({ onSend, error, setError }) {
-  const { sendEvent } = useSendEvent();
+export function EventForm({ onSend, error, setError, token }) {
+  const { sendEvent } = useSendEvent(token);
   const [message, setMessage] = useState('');
   const [sending, setSending] = useState(false);
 

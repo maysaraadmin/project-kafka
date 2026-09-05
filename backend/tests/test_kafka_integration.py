@@ -1,16 +1,17 @@
-import asyncio
 import json
 import os
 import sys
-import time
 
 import pytest
+
+pytest.importorskip("testcontainers")
+
+from kafka import KafkaConsumer, KafkaProducer
 from testcontainers.kafka import KafkaContainer
 from testcontainers.zookeeper import ZookeeperContainer
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from main import app, settings
 
 
 @pytest.fixture(scope="module")
@@ -35,6 +36,7 @@ def test_kafka_produce_consume(kafka_broker):
         auto_offset_reset="earliest",
         enable_auto_commit=True,
         value_deserializer=lambda m: json.loads(m.decode("utf-8")),
+        consumer_timeout_ms=10000,
     )
 
     producer = KafkaProducer(
@@ -45,7 +47,11 @@ def test_kafka_produce_consume(kafka_broker):
     producer.send("events", value=test_event)
     producer.flush()
 
-    msg = consumer.poll(timeout_ms=5000)
-    assert msg is not None
-    consumer.close()
-    producer.close()
+    try:
+        msg = consumer.poll(timeout_ms=5000)
+        assert msg, "Expected at least one message from Kafka"
+        received = list(msg.values())[0][0].value
+        assert received == test_event
+    finally:
+        consumer.close()
+        producer.close()

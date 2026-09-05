@@ -1,29 +1,39 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
-import { EventForm } from './EventForm';
+import { render, screen, fireEvent } from '@testing-library/react';
+import { EventForm } from '../EventForm';
+import { useSendEvent } from '../../hooks/useSendEvent';
 
-jest.mock('./useSendEvent', () => ({
-  useSendEvent: () => ({
-    sendEvent: jest.fn().mockResolvedValue(true),
-  }),
+jest.mock('../../hooks/useSendEvent', () => ({
+  useSendEvent: jest.fn(),
 }));
 
 describe('EventForm', () => {
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
   it('renders input and button', () => {
-    render(<EventForm onSend={() => {}} error={null} setError={() => {}} />);
+    useSendEvent.mockReturnValue({ sendEvent: jest.fn() });
+    render(<EventForm token="token" onSend={() => {}} error={null} setError={() => {}} />);
     expect(screen.getByPlaceholderText('Type an event...')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /send/i })).toBeInTheDocument();
   });
 
   it('submits event', async () => {
     const onSend = jest.fn();
-    render(<EventForm onSend={onSend} error={null} setError={() => {}} />);
+    const sendEvent = jest.fn().mockImplementation(() => new Promise(() => {}));
+    useSendEvent.mockReturnValue({ sendEvent });
+    render(<EventForm token="token" onSend={onSend} error={null} setError={() => {}} />);
     const input = screen.getByPlaceholderText('Type an event...');
     const button = screen.getByRole('button', { name: /send/i });
 
-    input.value = 'hello';
-    button.click();
+    fireEvent.change(input, { target: { value: 'hello' } });
+    fireEvent.click(button);
 
     expect(await screen.findByText(/Sending/)).toBeInTheDocument();
+    expect(sendEvent).toHaveBeenCalledWith(
+      'user_message',
+      expect.objectContaining({ text: 'hello' })
+    );
   });
 });

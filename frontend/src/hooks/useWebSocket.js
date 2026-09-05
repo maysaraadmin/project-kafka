@@ -1,7 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { WS_URL } from '../utils/helpers';
 
-export function useWebSocket(onMessage) {
+const RECONNECT_DELAY = 3000;
+
+function buildUrl(token) {
+  const sep = WS_URL.includes('?') ? '&' : '?';
+  return token ? `${WS_URL}${sep}token=${encodeURIComponent(token)}` : WS_URL;
+}
+
+export function useWebSocket(onMessage, token) {
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState(null);
   const wsRef = useRef(null);
@@ -9,6 +16,10 @@ export function useWebSocket(onMessage) {
   const mountedRef = useRef(true);
 
   const connect = useCallback(() => {
+    if (!token) {
+      setConnected(false);
+      return;
+    }
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       return;
     }
@@ -16,7 +27,7 @@ export function useWebSocket(onMessage) {
       wsRef.current.close();
     }
 
-    const ws = new WebSocket(WS_URL);
+    const ws = new WebSocket(buildUrl(token));
     wsRef.current = ws;
     setConnected(false);
 
@@ -40,11 +51,11 @@ export function useWebSocket(onMessage) {
 
     ws.onclose = () => {
       setConnected(false);
-      if (mountedRef.current) {
-        reconnectTimeoutRef.current = setTimeout(connect, 3000);
+      if (mountedRef.current && token) {
+        reconnectTimeoutRef.current = setTimeout(connect, RECONNECT_DELAY);
       }
     };
-  }, [onMessage]);
+  }, [onMessage, token]);
 
   useEffect(() => {
     mountedRef.current = true;

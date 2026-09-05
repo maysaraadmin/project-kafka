@@ -52,7 +52,8 @@ export function ErrorBanner({ error }) {
 export function EventItem({ event }) {
   const [expanded, setExpanded] = useState(false);
   const time = formatRelativeTime(event.timestamp || Date.now());
-  const payloadStr = JSON.stringify(event.payload, null, 2);
+  const payload = event.payload || {};
+  const payloadStr = JSON.stringify(payload, null, 2);
   const isLong = payloadStr.length > 120;
 
   return (
@@ -93,7 +94,7 @@ export function EventItem({ event }) {
           textOverflow: expanded ? 'clip' : 'ellipsis',
           wordBreak: 'break-word',
         }}>
-          {expanded ? payloadStr : JSON.stringify(event.payload)}
+          {expanded ? payloadStr : JSON.stringify(payload)}
         </pre>
         {isLong && (
           <span style={{ fontSize: 11, color: '#2563eb', marginTop: 4, display: 'inline-block' }}>

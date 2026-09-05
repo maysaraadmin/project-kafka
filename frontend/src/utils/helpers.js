@@ -1,4 +1,6 @@
-export const WS_URL = process.env.REACT_APP_WS_URL || 'ws://localhost:8000/ws';
+const wsProtocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss' : 'ws';
+const wsHost = typeof window !== 'undefined' ? window.location.host : 'localhost:8000';
+export const WS_URL = process.env.REACT_APP_WS_URL || `${wsProtocol}://${wsHost}/ws`;
 export const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
 
 export function deepClone(obj) {

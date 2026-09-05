@@ -1,24 +1,35 @@
 import asyncio
-import time
+import json
+import os
 import threading
+import time
 from collections import defaultdict
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
+
+import jwt
+import structlog
+from fastapi import (
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    Security,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from pydantic import BaseModel, Field, field_validator, ConfigDict
-from pydantic_settings import BaseSettings
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from kafka import KafkaConsumer, KafkaProducer
+from kafka.errors import KafkaError
+from pydantic import BaseModel, Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from kafka import KafkaProducer, KafkaConsumer, KafkaError
-import structlog
-import json
-import os
-import jwt
+from slowapi.util import get_remote_address
 
 
 class Settings(BaseSettings):
@@ -33,8 +44,17 @@ class Settings(BaseSettings):
     max_payload_size: int = 1024 * 1024
     jwt_secret_key: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
+    admin_username: str = "admin"
+    admin_password: str = "change-me-in-production"
 
-    model_config = ConfigDict(env_prefix="", case_sensitive=False)
+    model_config = SettingsConfigDict(env_prefix="", case_sensitive=False)
+
+    @field_validator("kafka_bootstrap_servers")
+    @classmethod
+    def _non_empty_bootstrap(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("kafka_bootstrap_servers must not be empty")
+        return v
 
     @property
     def cors_origins_list(self) -> list[str]:
@@ -56,10 +76,10 @@ logger = structlog.get_logger()
 
 try:
     from opentelemetry import trace
-    from opentelemetry.sdk.trace import TracerProvider
-    from opentelemetry.sdk.trace.export import BatchSpanProcessor
     from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
     trace.set_tracer_provider(TracerProvider())
     tracer_provider = trace.get_tracer_provider()
@@ -74,11 +94,14 @@ except ImportError:
 class ThreadSafeMetrics:
     """Thread-safe metrics collector for event counts and errors."""
 
-    def __init__(self):
-        self._data = defaultdict(int)
+    def __init__(self) -> None:
+        self._data: defaultdict[str, int] = defaultdict(int)
+        self._data["events_published"] = 0
+        self._data["events_broadcast"] = 0
+        self._data["ws_errors"] = 0
         self._lock = threading.Lock()
 
-    def increment(self, key: str, amount: int = 1):
+    def increment(self, key: str, amount: int = 1) -> None:
         with self._lock:
             self._data[key] += amount
 
@@ -96,32 +119,29 @@ limiter = Limiter(key_func=get_remote_address)
 security = HTTPBearer(auto_error=False)
 
 
-class TokenData(BaseModel):
-    username: str
-    exp: datetime
-
-
-def create_access_token(data: dict) -> str:
+def create_access_token(data: dict[str, Any]) -> str:
     """Create a JWT access token."""
     to_encode = data.copy()
     exp = datetime.now(timezone.utc).timestamp() + 3600
     to_encode.update({"exp": exp})
-    return jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    token: str = jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    return token
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = None,
+    credentials: HTTPAuthorizationCredentials = Security(security),
 ) -> str:
     """Validate JWT token and return username."""
     if not credentials:
         raise HTTPException(status_code=401, detail="Not authenticated")
     try:
-        payload = jwt.decode(
+        payload: dict[str, Any] = jwt.decode(
             credentials.credentials,
             settings.jwt_secret_key,
             algorithms=[settings.jwt_algorithm],
         )
-        return payload.get("sub", "anonymous")
+        username: str = payload.get("sub", "anonymous")
+        return username
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
@@ -131,23 +151,23 @@ async def get_current_user(
 class ConnectionManager:
     """Thread-safe manager for active WebSocket connections."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.active_connections: list[WebSocket] = []
         self._lock = threading.Lock()
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket) -> None:
         await websocket.accept()
         with self._lock:
             self.active_connections.append(websocket)
         logger.info("ws.connected", total=len(self.active_connections))
 
-    def disconnect(self, websocket: WebSocket):
+    def disconnect(self, websocket: WebSocket) -> None:
         with self._lock:
             if websocket in self.active_connections:
                 self.active_connections.remove(websocket)
         logger.info("ws.disconnected", total=len(self.active_connections))
 
-    async def broadcast(self, message: str):
+    async def broadcast(self, message: str) -> None:
         with self._lock:
             connections = list(self.active_connections)
         for connection in connections:
@@ -168,7 +188,7 @@ class Event(BaseModel):
     """Validated event model for Kafka messages."""
 
     type: str = Field(..., min_length=1, max_length=64, examples=["user_message"])
-    payload: dict[str, Any] = Field(..., max_length=settings.max_payload_size, examples=[{"text": "hello"}])
+    payload: dict[str, Any] = Field(..., examples=[{"text": "hello"}])
     source: str | None = Field(default=None, max_length=128, examples=["web"])
 
     @field_validator("type")
@@ -189,10 +209,9 @@ class Event(BaseModel):
 
 
 manager = ConnectionManager()
-limiter = Limiter(key_func=get_remote_address)
 
 
-async def broadcaster(queue: asyncio.Queue):
+async def broadcaster(queue: asyncio.Queue[Any]) -> None:
     """Consume messages from the internal queue and broadcast to all WebSocket clients."""
     while True:
         try:
@@ -206,7 +225,7 @@ async def broadcaster(queue: asyncio.Queue):
             metrics.increment("ws_errors")
 
 
-async def safe_put(queue: asyncio.Queue, value):
+async def safe_put(queue: asyncio.Queue[Any], value: Any) -> None:
     """Put a value into the queue, dropping the oldest item if the queue is full."""
     while True:
         try:
@@ -220,10 +239,10 @@ async def safe_put(queue: asyncio.Queue, value):
 
 
 def start_consumer(
-    queue: asyncio.Queue,
+    queue: asyncio.Queue[Any],
     loop: asyncio.AbstractEventLoop,
     stop_event: threading.Event,
-):
+) -> None:
     """Background thread that consumes Kafka messages and forwards them to the async queue."""
     while not stop_event.is_set():
         consumer = None
@@ -256,9 +275,9 @@ def start_consumer(
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Manage application startup and shutdown lifecycle."""
-    queue: asyncio.Queue = asyncio.Queue(maxsize=settings.max_queue_size)
+    queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=settings.max_queue_size)
     loop = asyncio.get_running_loop()
     stop_event = threading.Event()
 
@@ -318,22 +337,22 @@ class LoginRequest(BaseModel):
 
 
 @app.post("/auth/login")
-async def login(request: LoginRequest):
+async def login(request: LoginRequest) -> dict[str, str]:
     """Authenticate and return a JWT access token."""
-    if request.username != "admin" or request.password != "admin":
+    if request.username != settings.admin_username or request.password != settings.admin_password:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     token = create_access_token({"sub": request.username})
     return {"access_token": token, "token_type": "bearer"}
 
 
 @app.get("/health", response_model=dict, responses={200: {"content": {"application/json": {"example": {"status": "ok"}}}}})
-async def health():
+async def health() -> dict[str, str]:
     """Health check endpoint for Docker and load balancers."""
     return {"status": "ok"}
 
 
 @app.get("/metrics", response_model=dict, responses={200: {"content": {"application/json": {"example": {"events_published": 10, "events_broadcast": 10, "ws_errors": 0}}}}})
-async def metrics_endpoint():
+async def metrics_endpoint() -> dict[str, int]:
     """Expose application metrics such as event counts and WebSocket errors."""
     return metrics.snapshot()
 
@@ -341,11 +360,14 @@ async def metrics_endpoint():
 @app.post("/events", response_model=dict, responses={
     200: {"content": {"application/json": {"example": {"status": "ok"}}}},
     401: {"description": "Missing or invalid JWT token"},
+    429: {"description": "Rate limit exceeded"},
     422: {"description": "Validation error"},
     500: {"description": "Failed to publish event"},
 })
 @limiter.limit("100/minute")
-async def create_event(event: Event, username: str = Depends(get_current_user)):
+async def create_event(
+    request: Request, event: Event, username: str = Depends(get_current_user)
+) -> dict[str, str]:
     """Publish an event to Kafka and track it in metrics."""
     try:
         future = app.state.producer.send(
@@ -364,8 +386,29 @@ async def create_event(event: Event, username: str = Depends(get_current_user)):
 
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket) -> None:
     """Accept WebSocket connections and stream events to connected clients."""
+    token = websocket.query_params.get("token")
+    if not token:
+        logger.warning("ws.rejected", reason="missing_token")
+        await websocket.close(code=4003)
+        return
+    try:
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret_key,
+            algorithms=[settings.jwt_algorithm],
+        )
+        username = payload.get("sub")
+        if not username:
+            logger.warning("ws.rejected", reason="invalid_token")
+            await websocket.close(code=4003)
+            return
+    except jwt.PyJWTError:
+        logger.warning("ws.rejected", reason="invalid_token")
+        await websocket.close(code=4003)
+        return
+
     origin = websocket.headers.get("origin", "")
     if "*" not in settings.cors_origins_list and origin not in settings.cors_origins_list:
         logger.warning("ws.rejected", origin=origin)

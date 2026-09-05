@@ -1,7 +1,5 @@
-import json
 import os
 import sys
-import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -9,7 +7,13 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from main import app, settings, Event, ConnectionManager
+from main import ConnectionManager, Event, app, create_access_token
+
+
+@pytest.fixture
+def auth_headers():
+    token = create_access_token({"sub": "test"})
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture
@@ -39,26 +43,25 @@ class TestEventModel:
 
 
 class TestConnectionManager:
-    def test_connect_disconnect(self):
+    async def test_connect_disconnect(self):
         manager = ConnectionManager()
         ws = AsyncMock()
-        manager.connect(ws)
+        await manager.connect(ws)
         assert ws in manager.active_connections
         manager.disconnect(ws)
         assert ws not in manager.active_connections
 
-    def test_double_disconnect(self):
+    async def test_double_disconnect(self):
         manager = ConnectionManager()
         ws = AsyncMock()
-        manager.connect(ws)
+        await manager.connect(ws)
         manager.disconnect(ws)
         manager.disconnect(ws)  # should not raise
 
-    @pytest.mark.asyncio
     async def test_broadcast(self):
         manager = ConnectionManager()
         ws = AsyncMock()
-        manager.connect(ws)
+        await manager.connect(ws)
         await manager.broadcast("test")
         ws.send_text.assert_called_once_with("test")
 
@@ -81,7 +84,7 @@ class TestMetricsEndpoint:
 
 
 class TestEventsEndpoint:
-    def test_create_event(self, client):
+    def test_create_event(self, client, auth_headers):
         with patch("main.app.state.producer") as mock_producer:
             mock_future = MagicMock()
             mock_producer.send.return_value = mock_future
@@ -94,31 +97,30 @@ class TestEventsEndpoint:
             response = client.post(
                 "/events",
                 json={"type": "user_message", "payload": {"text": "hello"}},
+                headers=auth_headers,
             )
             assert response.status_code == 200
             assert response.json() == {"status": "ok"}
 
-    def test_create_event_invalid_type(self, client):
+    def test_create_event_invalid_type(self, client, auth_headers):
         response = client.post(
             "/events",
             json={"type": "invalid", "payload": {"text": "hello"}},
+            headers=auth_headers,
         )
         assert response.status_code == 422
 
-    def test_create_event_payload_too_large(self, client):
+    def test_create_event_payload_too_large(self, client, auth_headers, monkeypatch):
+        monkeypatch.setattr("main.settings.max_payload_size", 10)
         big_payload = {"text": "x" * 10000}
-        with patch("main.settings") as mock_settings:
-            mock_settings.max_payload_size = 100
-            mock_settings.producer_timeout = 10
-            mock_settings.kafka_topic = "events"
+        with patch("main.app.state.producer") as mock_producer:
+            mock_future = MagicMock()
+            mock_producer.send.return_value = mock_future
+            mock_future.get.side_effect = lambda timeout: None
 
-            with patch("main.app.state.producer") as mock_producer:
-                mock_future = MagicMock()
-                mock_producer.send.return_value = mock_future
-                mock_future.get.side_effect = lambda timeout: None
-
-                response = client.post(
-                    "/events",
-                    json={"type": "user_message", "payload": big_payload},
-                )
-                assert response.status_code == 422
+            response = client.post(
+                "/events",
+                json={"type": "user_message", "payload": big_payload},
+                headers=auth_headers,
+            )
+            assert response.status_code == 422

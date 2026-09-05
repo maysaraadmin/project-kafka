@@ -1,8 +1,8 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { EventItem } from './Common';
-import { EventFeed } from './EventFeed';
-import { ConnectionStatus } from './Common';
+import { EventItem } from '../Common';
+import { EventFeed } from '../EventFeed';
+import { ConnectionStatus } from '../Common';
 
 jest.mock('react-window', () => ({
   FixedSizeList: ({ children, itemCount, height }) => (

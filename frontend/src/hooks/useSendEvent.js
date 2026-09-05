@@ -1,14 +1,17 @@
 import { useCallback } from 'react';
 import { API_URL } from '../utils/helpers';
 
-export function useSendEvent() {
+export function useSendEvent(token) {
   const sendEvent = useCallback(async (type, payload) => {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
     try {
       const response = await fetch(`${API_URL}/events`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: token ? `Bearer ${token}` : '',
+        },
         body: JSON.stringify({ type, payload }),
         signal: controller.signal,
       });
@@ -25,7 +28,7 @@ export function useSendEvent() {
       }
       throw e;
     }
-  }, []);
+  }, [token]);
 
   return { sendEvent };
 }
