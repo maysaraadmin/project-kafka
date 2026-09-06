@@ -32,6 +32,7 @@ services:
     depends_on:
       - kafka
     environment:
+      ENV: dev
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_TOPIC: events
       CORS_ORIGINS: "*"

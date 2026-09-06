@@ -1,29 +1,10 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { FixedSizeList as List } from 'react-window';
 import { EventItem } from './Common';
 
 const ROW_HEIGHT = 56;
 
 export function EventFeed({ events }) {
-  const list = useMemo(() => (
-    <List
-      height={400}
-      itemCount={events.length}
-      itemSize={ROW_HEIGHT}
-      width="100%"
-      overscanCount={5}
-    >
-      {({ index, style }) => {
-        const ev = events[index];
-        return (
-          <div style={style}>
-            <EventItem event={ev} />
-          </div>
-        );
-      }}
-    </List>
-  ), [events]);
-
   return (
     <div style={{
       marginTop: 16,
@@ -42,7 +23,23 @@ export function EventFeed({ events }) {
           No events yet. Send one above to see it here.
         </div>
       ) : (
-        list
+        <List
+          height={400}
+          itemCount={events.length}
+          itemSize={ROW_HEIGHT}
+          width="100%"
+          overscanCount={5}
+          itemKey={(index, data) => data[index]._clientId}
+        >
+          {({ index, style }) => {
+            const ev = events[index];
+            return (
+              <div style={style}>
+                <EventItem event={ev} />
+              </div>
+            );
+          }}
+        </List>
       )}
     </div>
   );

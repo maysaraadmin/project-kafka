@@ -5,7 +5,12 @@ import { useSendEvent } from '../useSendEvent';
 jest.mock('../../utils/helpers', () => ({
   WS_URL: 'ws://localhost:8000/ws',
   API_URL: 'http://localhost:8000',
-  deepClone: (obj) => JSON.parse(JSON.stringify(obj)),
+  deepClone: (obj) => {
+    if (typeof structuredClone === 'function') {
+      return structuredClone(obj);
+    }
+    return JSON.parse(JSON.stringify(obj));
+  },
   formatRelativeTime: (ts) => 'just now',
 }));
 
@@ -101,6 +106,6 @@ describe('useSendEvent', () => {
       await result.current.sendEvent('user_message', { text: 'hello' });
     });
     const [, options] = fetch.mock.calls[0];
-    expect(options.headers.Authorization).toBe('');
+    expect(options.headers.Authorization).toBeUndefined();
   });
 });

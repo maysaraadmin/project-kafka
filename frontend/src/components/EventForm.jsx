@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useSendEvent } from '../hooks/useSendEvent';
 import { ErrorBanner } from './Common';
+import { theme } from '../styles/theme';
 
 export function EventForm({ onSend, error, setError, token }) {
   const { sendEvent } = useSendEvent(token);
@@ -30,8 +31,8 @@ export function EventForm({ onSend, error, setError, token }) {
     <form onSubmit={handleSubmit}>
       <div style={{
         display: 'flex',
-        gap: 8,
-        marginTop: 12,
+        gap: theme.spacing.sm,
+        marginTop: theme.spacing.md,
       }}>
         <input
           type="text"
@@ -41,10 +42,10 @@ export function EventForm({ onSend, error, setError, token }) {
           disabled={sending}
           style={{
             flex: 1,
-            padding: '8px 12px',
-            border: '1px solid #e2e8f0',
-            borderRadius: 6,
-            fontSize: 14,
+            padding: `${theme.spacing.sm} ${theme.spacing.md}`,
+            border: `1px solid ${theme.colors.gray[200]}`,
+            borderRadius: theme.radii.sm,
+            fontSize: theme.typography.fontSize.base,
             outline: 'none',
           }}
         />
@@ -52,12 +53,12 @@ export function EventForm({ onSend, error, setError, token }) {
           type="submit"
           disabled={sending}
           style={{
-            padding: '8px 16px',
-            background: sending ? '#94a3b8' : '#2563eb',
+            padding: `${theme.spacing.sm} ${theme.spacing.lg}`,
+            background: sending ? theme.colors.primaryDisabled : theme.colors.primary,
             color: '#fff',
             border: 'none',
-            borderRadius: 6,
-            fontSize: 14,
+            borderRadius: theme.radii.sm,
+            fontSize: theme.typography.fontSize.base,
             cursor: sending ? 'not-allowed' : 'pointer',
           }}
         >

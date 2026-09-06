@@ -1,6 +1,9 @@
+import os
 from unittest.mock import MagicMock
 
 import pytest
+
+os.environ.setdefault("ENV", "test")
 
 
 @pytest.fixture(autouse=True)

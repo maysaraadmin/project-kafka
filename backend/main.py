@@ -25,7 +25,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from kafka import KafkaConsumer, KafkaProducer
 from kafka.errors import KafkaError
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -42,10 +42,13 @@ class Settings(BaseSettings):
     producer_timeout: int = 10
     consumer_retry_delay: int = 5
     max_payload_size: int = 1024 * 1024
+    kafka_max_request_size: int = 5 * 1024 * 1024
+    kafka_fetch_max_bytes: int = 5 * 1024 * 1024
     jwt_secret_key: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
     admin_username: str = "admin"
     admin_password: str = "change-me-in-production"
+    metrics_trusted_ips: str = ""
 
     model_config = SettingsConfigDict(env_prefix="", case_sensitive=False)
 
@@ -56,11 +59,24 @@ class Settings(BaseSettings):
             raise ValueError("kafka_bootstrap_servers must not be empty")
         return v
 
+    @field_validator("jwt_secret_key", "admin_password")
+    @classmethod
+    def _reject_default_secrets(cls, v: str, info: ValidationInfo) -> str:
+        if os.getenv("ENV", "dev") == "production" and v == "change-me-in-production":
+            raise ValueError(f"{info.field_name} must be set to a strong secret in production")
+        return v
+
     @property
     def cors_origins_list(self) -> list[str]:
         if self.cors_origins == "*":
             return ["*"]
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def metrics_trusted_ips_list(self) -> list[str]:
+        if not self.metrics_trusted_ips.strip():
+            return []
+        return [ip.strip() for ip in self.metrics_trusted_ips.split(",") if ip.strip()]
 
 
 settings = Settings()
@@ -167,14 +183,25 @@ class ConnectionManager:
                 self.active_connections.remove(websocket)
         logger.info("ws.disconnected", total=len(self.active_connections))
 
+    async def _safe_send(self, connection: WebSocket, message: str, dead: list[WebSocket]) -> None:
+        try:
+            await asyncio.wait_for(connection.send_text(message), timeout=2.0)
+        except (WebSocketDisconnect, RuntimeError, asyncio.TimeoutError) as exc:
+            logger.warning("ws.send_failed", error=str(exc))
+            dead.append(connection)
+            metrics.increment("ws_errors")
+
     async def broadcast(self, message: str) -> None:
         with self._lock:
             connections = list(self.active_connections)
-        for connection in connections:
-            try:
-                await connection.send_text(message)
-            except (WebSocketDisconnect, RuntimeError):
-                self.disconnect(connection)
+        dead: list[WebSocket] = []
+        if connections:
+            await asyncio.gather(
+                *(self._safe_send(connection, message, dead) for connection in connections),
+                return_exceptions=True,
+            )
+        for connection in dead:
+            self.disconnect(connection)
 
 
 class EventType(str):
@@ -182,6 +209,9 @@ class EventType(str):
     SYSTEM = "system"
     ORDER = "order"
     CLICK = "click"
+
+
+ALLOWED_EVENT_TYPES = {EventType.USER_MESSAGE, EventType.SYSTEM, EventType.ORDER, EventType.CLICK}
 
 
 class Event(BaseModel):
@@ -194,9 +224,8 @@ class Event(BaseModel):
     @field_validator("type")
     @classmethod
     def validate_type(cls, v: str) -> str:
-        allowed = {"user_message", "system", "order", "click"}
-        if v not in allowed:
-            raise ValueError(f"type must be one of {allowed}")
+        if v not in ALLOWED_EVENT_TYPES:
+            raise ValueError(f"type must be one of {sorted(ALLOWED_EVENT_TYPES)}")
         return v
 
     @field_validator("payload")
@@ -234,6 +263,7 @@ async def safe_put(queue: asyncio.Queue[Any], value: Any) -> None:
         except asyncio.QueueFull:
             try:
                 queue.get_nowait()
+                metrics.increment("events_dropped")
             except asyncio.QueueEmpty:
                 await asyncio.sleep(0.01)
 
@@ -244,6 +274,7 @@ def start_consumer(
     stop_event: threading.Event,
 ) -> None:
     """Background thread that consumes Kafka messages and forwards them to the async queue."""
+    retry_delay = settings.consumer_retry_delay
     while not stop_event.is_set():
         consumer = None
         try:
@@ -253,19 +284,22 @@ def start_consumer(
                 auto_offset_reset="latest",
                 enable_auto_commit=True,
                 max_poll_records=50,
-                fetch_max_bytes=5242880,
+                fetch_max_bytes=settings.kafka_fetch_max_bytes,
                 value_deserializer=lambda m: json.loads(m.decode("utf-8")),
             )
             for msg in consumer:
                 if stop_event.is_set():
                     break
                 asyncio.run_coroutine_threadsafe(safe_put(queue, msg.value), loop)
+            retry_delay = settings.consumer_retry_delay
         except (KafkaError, ConnectionError, OSError) as e:
             logger.warning("consumer.retryable_error", error=str(e))
-            time.sleep(settings.consumer_retry_delay)
+            time.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, 60)
         except Exception as e:
             logger.error("consumer.fatal_error", error=str(e))
-            time.sleep(settings.consumer_retry_delay)
+            time.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, 60)
         finally:
             if consumer is not None:
                 try:
@@ -284,7 +318,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     producer = KafkaProducer(
         bootstrap_servers=settings.kafka_bootstrap_servers,
         value_serializer=lambda v: json.dumps(v).encode("utf-8"),
-        max_request_size=settings.max_payload_size,
+        max_request_size=settings.kafka_max_request_size,
     )
 
     consumer_thread = threading.Thread(
@@ -352,8 +386,11 @@ async def health() -> dict[str, str]:
 
 
 @app.get("/metrics", response_model=dict, responses={200: {"content": {"application/json": {"example": {"events_published": 10, "events_broadcast": 10, "ws_errors": 0}}}}})
-async def metrics_endpoint() -> dict[str, int]:
+async def metrics_endpoint(request: Request) -> dict[str, int]:
     """Expose application metrics such as event counts and WebSocket errors."""
+    client_ip = request.client.host if request.client else ""
+    if settings.metrics_trusted_ips_list and client_ip not in settings.metrics_trusted_ips_list:
+        raise HTTPException(status_code=403, detail="Forbidden")
     return metrics.snapshot()
 
 

@@ -1,9 +1,10 @@
 import React, { useState, useCallback } from 'react';
 import { useWebSocket } from './hooks/useWebSocket';
-import { deepClone, API_URL } from './utils/helpers';
+import { API_URL } from './utils/helpers';
 import { ConnectionStatus, ErrorBanner } from './components/Common';
 import { EventForm } from './components/EventForm';
 import { EventFeed } from './components/EventFeed';
+import { theme } from './styles/theme';
 
 function App() {
   const [events, setEvents] = useState([]);
@@ -18,8 +19,7 @@ function App() {
 
   const handleMessage = useCallback((newEvent) => {
     setEvents((prev) => {
-      const entry = deepClone(newEvent);
-      entry._clientId = `${Date.now()}-${Math.random()}`;
+      const entry = { ...newEvent, _clientId: `${Date.now()}-${Math.random()}` };
       return [entry, ...prev].slice(0, 50);
     });
   }, []);
@@ -50,8 +50,8 @@ function App() {
   const containerStyle = {
     maxWidth: 720,
     margin: '0 auto',
-    padding: '24px 16px',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    padding: `${theme.spacing.xl} ${theme.spacing.lg}`,
+    fontFamily: theme.typography.fontFamily,
   };
 
   if (!token) {
@@ -81,18 +81,18 @@ function App() {
     return (
       <div className="app-container" style={containerStyle}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Live Activity Feed</h1>
+          <h1 style={{ fontSize: theme.typography.fontSize.xl, fontWeight: theme.typography.fontWeight.bold, margin: 0 }}>Live Activity Feed</h1>
           <ConnectionStatus connected={connected} />
         </div>
         <ErrorBanner error={wsError} />
-        <form onSubmit={handleLogin} style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <form onSubmit={handleLogin} style={{ marginTop: theme.spacing.lg, display: 'flex', flexDirection: 'column', gap: theme.spacing.md }}>
           <input
             type="text"
             value={loginUser}
             onChange={(e) => setLoginUser(e.target.value)}
             placeholder="Username"
             disabled={loginLoading}
-            style={{ padding: '8px 12px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 14 }}
+            style={{ padding: `${theme.spacing.sm} ${theme.spacing.md}`, border: `1px solid ${theme.colors.gray[200]}`, borderRadius: theme.radii.sm, fontSize: theme.typography.fontSize.base }}
           />
           <input
             type="password"
@@ -100,18 +100,18 @@ function App() {
             onChange={(e) => setLoginPass(e.target.value)}
             placeholder="Password"
             disabled={loginLoading}
-            style={{ padding: '8px 12px', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 14 }}
+            style={{ padding: `${theme.spacing.sm} ${theme.spacing.md}`, border: `1px solid ${theme.colors.gray[200]}`, borderRadius: theme.radii.sm, fontSize: theme.typography.fontSize.base }}
           />
           <button
             type="submit"
             disabled={loginLoading}
             style={{
-              padding: '8px 16px',
-              background: loginLoading ? '#94a3b8' : '#2563eb',
+              padding: `${theme.spacing.sm} ${theme.spacing.lg}`,
+              background: loginLoading ? theme.colors.primaryDisabled : theme.colors.primary,
               color: '#fff',
               border: 'none',
-              borderRadius: 6,
-              fontSize: 14,
+              borderRadius: theme.radii.sm,
+              fontSize: theme.typography.fontSize.base,
               cursor: loginLoading ? 'not-allowed' : 'pointer',
             }}
           >
@@ -129,24 +129,24 @@ function App() {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        marginBottom: 8,
+        marginBottom: theme.spacing.sm,
         flexWrap: 'wrap',
-        gap: 8,
+        gap: theme.spacing.sm,
       }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>
+        <h1 style={{ fontSize: theme.typography.fontSize.xl, fontWeight: theme.typography.fontWeight.bold, margin: 0 }}>
           Live Activity Feed
         </h1>
-        <div style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+        <div style={{ display: 'inline-flex', gap: theme.spacing.sm, alignItems: 'center' }}>
           <ConnectionStatus connected={connected} />
           <button
             onClick={handleLogout}
             style={{
-              padding: '4px 10px',
-              border: '1px solid #e2e8f0',
-              borderRadius: 999,
+              padding: `${theme.spacing.xs} ${theme.spacing.md}`,
+              border: `1px solid ${theme.colors.gray[200]}`,
+              borderRadius: theme.radii.full,
               background: '#fff',
-              color: '#334155',
-              fontSize: 12,
+              color: theme.colors.gray[600],
+              fontSize: theme.typography.fontSize.sm,
               cursor: 'pointer',
             }}
           >
@@ -158,23 +158,23 @@ function App() {
       <EventForm token={token} onSend={handleSend} error={error} setError={setError} />
       <div className="filter-row" style={{
         display: 'flex',
-        gap: 8,
-        marginTop: 12,
+        gap: theme.spacing.sm,
+        marginTop: theme.spacing.md,
         flexWrap: 'wrap',
         alignItems: 'center',
       }}>
-        <label style={{ fontSize: 13, color: '#64748b' }}>Filter:</label>
+        <label style={{ fontSize: theme.typography.fontSize.sm, color: theme.colors.gray[500] }}>Filter:</label>
         {['all', 'user_message', 'system', 'order', 'click'].map((type) => (
           <button
             key={type}
             onClick={() => setFilter(type)}
             style={{
-              padding: '4px 12px',
-              border: '1px solid #e2e8f0',
-              borderRadius: 999,
-              background: filter === type ? '#2563eb' : '#fff',
-              color: filter === type ? '#fff' : '#334155',
-              fontSize: 12,
+              padding: `${theme.spacing.xs} ${theme.spacing.md}`,
+              border: `1px solid ${theme.colors.gray[200]}`,
+              borderRadius: theme.radii.full,
+              background: filter === type ? theme.colors.primary : '#fff',
+              color: filter === type ? '#fff' : theme.colors.gray[600],
+              fontSize: theme.typography.fontSize.sm,
               cursor: 'pointer',
             }}
           >
@@ -188,10 +188,10 @@ function App() {
           placeholder="Search events..."
           style={{
             marginLeft: 'auto',
-            padding: '6px 12px',
-            border: '1px solid #e2e8f0',
-            borderRadius: 999,
-            fontSize: 12,
+            padding: `${theme.spacing.sm} ${theme.spacing.md}`,
+            border: `1px solid ${theme.colors.gray[200]}`,
+            borderRadius: theme.radii.full,
+            fontSize: theme.typography.fontSize.sm,
             minWidth: 140,
           }}
         />

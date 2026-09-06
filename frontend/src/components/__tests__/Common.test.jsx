@@ -5,9 +5,9 @@ import { EventFeed } from '../EventFeed';
 import { ConnectionStatus } from '../Common';
 
 jest.mock('react-window', () => ({
-  FixedSizeList: ({ children, itemCount, height }) => (
+  FixedSizeList: ({ children, itemCount, height, data }) => (
     <div data-testid="virtual-list" style={{ height }}>
-      {Array.from({ length: itemCount }).map((_, i) => children({ index: i, style: {} }))}
+      {Array.from({ length: itemCount }).map((_, i) => children({ index: i, style: {}, data }))}
     </div>
   ),
 }));

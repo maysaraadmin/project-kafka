@@ -124,3 +124,11 @@ class TestEventsEndpoint:
                 headers=auth_headers,
             )
             assert response.status_code == 422
+
+
+class TestLifespan:
+    def test_startup_sets_app_state(self):
+        with TestClient(app) as c:
+            assert hasattr(c.app.state, "queue")
+            assert hasattr(c.app.state, "producer")
+            assert hasattr(c.app.state, "manager")
