@@ -6,8 +6,8 @@ React + FastAPI + Kafka app for streaming live events with WebSockets.
 
 ```
 React UI -> (POST /events) -> FastAPI -> Kafka topic `events`
-                                        |
-                                        v
+                                         |
+                                         v
 FastAPI consumer -> WebSocket -> React UI
 ```
 
@@ -24,7 +24,9 @@ docker-compose up --build
 ```
 
 - Frontend: http://localhost:3000
+- API root: http://localhost:8000/
 - API docs: http://localhost:8000/docs
+- Health: http://localhost:8000/health
 - Metrics: http://localhost:8000/metrics
 
 ## Environment
@@ -33,10 +35,14 @@ See `.env.example`. Key variables:
 
 | Variable | Default | Description |
 |---|---|---|
+| `ENV` | `dev` | Environment mode (`dev` / `production`) |
 | `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | Kafka broker address |
 | `KAFKA_TOPIC` | `events` | Kafka topic name |
 | `CORS_ORIGINS` | `*` | Allowed CORS origins |
 | `MAX_PAYLOAD_SIZE` | `1048576` | Max event payload size (bytes) |
+| `KAFKA_MAX_REQUEST_SIZE` | `5242880` | Max Kafka producer request size (bytes) |
+| `KAFKA_FETCH_MAX_BYTES` | `5242880` | Max Kafka consumer fetch size (bytes) |
+| `METRICS_TRUSTED_IPS` | `` | Comma-separated IPs allowed to access `/metrics` |
 | `REACT_APP_WS_URL` | `ws://localhost:8000/ws` | WebSocket URL |
 | `REACT_APP_API_URL` | `http://localhost:8000` | API base URL |
 
@@ -78,6 +84,8 @@ npm test
 
 | Method | Path | Description |
 |---|---|---|
+| GET | `/` | API info |
+| POST | `/auth/login` | Authenticate and get JWT |
 | POST | `/events` | Publish an event |
 | GET | `/health` | Health check |
 | GET | `/metrics` | Event counters |
@@ -94,6 +102,19 @@ npm test
 ```
 
 Allowed types: `user_message`, `system`, `order`, `click`
+
+## Features
+
+- JWT authentication for `/events` and `/ws`
+- Rate limiting on event creation (`100/minute`)
+- Structured JSON logging with `structlog`
+- Optional OpenTelemetry tracing
+- Thread-safe WebSocket broadcast with timeout and concurrent delivery
+- Kafka consumer with exponential backoff on retryable errors
+- Dropped-message tracking when the internal queue is full
+- Configurable Kafka producer/consumer size limits
+- IP-restricted `/metrics` endpoint in production
+- Frontend theme tokens and stable virtualized event feed
 
 ## Troubleshooting
 
