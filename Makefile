@@ -1,4 +1,4 @@
-.PHONY: help backend-test frontend-test lint backend-lint frontend-lint typecheck format docker-up docker-down
+.PHONY: help backend-test frontend-test lint backend-lint frontend-lint typecheck format docker-up docker-down docker-reset kafka-reset
 
 help:
 	@echo "Available targets:"
@@ -11,6 +11,8 @@ help:
 	@echo "  format         - Format code with ruff and prettier"
 	@echo "  docker-up      - Start all services"
 	@echo "  docker-down    - Stop all services"
+	@echo "  docker-reset   - Stop services and remove volumes (Kafka/ZK data)"
+	@echo "  kafka-reset    - Recreate Kafka topic if metadata is corrupted"
 
 backend-test:
 	cd backend && pytest --cov=main --cov-report=term-missing
@@ -38,3 +40,13 @@ docker-up:
 
 docker-down:
 	docker-compose down -v
+
+docker-reset:
+	docker-compose down
+	docker volume rm project-kafka_kafka_data project-kafka_zookeeper_data || true
+	docker-compose up -d
+
+kafka-reset:
+	docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --delete --topic events || true
+	sleep 2
+	docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --create --topic events --partitions 1 --replication-factor 1 || true
