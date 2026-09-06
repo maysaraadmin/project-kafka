@@ -46,6 +46,17 @@ class Settings(BaseSettings):
     max_payload_size: int = 1024 * 1024
     kafka_max_request_size: int = 5 * 1024 * 1024
     kafka_fetch_max_bytes: int = 5 * 1024 * 1024
+    kafka_producer_acks: str = "all"
+    kafka_producer_retries: int = 2147483647
+    kafka_producer_max_in_flight: int = 5
+    kafka_producer_enable_idempotence: bool = True
+    kafka_consumer_group_id: str = "activity-dashboard-consumer"
+    kafka_consumer_auto_offset_reset: str = "latest"
+    kafka_consumer_enable_auto_commit: bool = False
+    kafka_consumer_session_timeout_ms: int = 30000
+    kafka_consumer_heartbeat_interval_ms: int = 10000
+    kafka_consumer_max_poll_records: int = 100
+    kafka_consumer_max_poll_interval_ms: int = 300000
     jwt_secret_key: str = "dev-secret-key-change-in-production-1234567890"
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 1440
@@ -293,9 +304,13 @@ def start_consumer(
             consumer = KafkaConsumer(
                 settings.kafka_topic,
                 bootstrap_servers=settings.kafka_bootstrap_servers,
-                auto_offset_reset="latest",
-                enable_auto_commit=True,
-                max_poll_records=50,
+                auto_offset_reset=settings.kafka_consumer_auto_offset_reset,
+                enable_auto_commit=settings.kafka_consumer_enable_auto_commit,
+                group_id=settings.kafka_consumer_group_id,
+                session_timeout_ms=settings.kafka_consumer_session_timeout_ms,
+                heartbeat_interval_ms=settings.kafka_consumer_heartbeat_interval_ms,
+                max_poll_records=settings.kafka_consumer_max_poll_records,
+                max_poll_interval_ms=settings.kafka_consumer_max_poll_interval_ms,
                 fetch_max_bytes=settings.kafka_fetch_max_bytes,
                 value_deserializer=lambda m: json.loads(m.decode("utf-8")),
             )
@@ -308,6 +323,8 @@ def start_consumer(
                         if stop_event.is_set():
                             break
                         asyncio.run_coroutine_threadsafe(safe_put(queue, msg.value), loop)
+                if not settings.kafka_consumer_enable_auto_commit:
+                    consumer.commit()
             retry_delay = settings.consumer_retry_delay
         except (KafkaError, ConnectionError, OSError) as e:
             logger.warning("consumer.retryable_error", error=str(e))
@@ -335,6 +352,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         bootstrap_servers=settings.kafka_bootstrap_servers,
         value_serializer=lambda v: json.dumps(v).encode("utf-8"),
         max_request_size=settings.kafka_max_request_size,
+        acks=settings.kafka_producer_acks,
+        retries=settings.kafka_producer_retries,
+        max_in_flight_requests_per_connection=settings.kafka_producer_max_in_flight,
+        enable_idempotence=settings.kafka_producer_enable_idempotence,
     )
 
     consumer_thread = threading.Thread(
