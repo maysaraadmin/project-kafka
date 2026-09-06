@@ -385,6 +385,17 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get("/", response_model=dict, responses={200: {"content": {"application/json": {"example": {"message": "Real-time Activity Dashboard API", "docs": "/docs", "health": "/health", "metrics": "/metrics"}}}}})
+async def root() -> dict[str, str]:
+    """Root endpoint with API info."""
+    return {
+        "message": "Real-time Activity Dashboard API",
+        "docs": "/docs",
+        "health": "/health",
+        "metrics": "/metrics",
+    }
+
+
 @app.get("/metrics", response_model=dict, responses={200: {"content": {"application/json": {"example": {"events_published": 10, "events_broadcast": 10, "ws_errors": 0}}}}})
 async def metrics_endpoint(request: Request) -> dict[str, int]:
     """Expose application metrics such as event counts and WebSocket errors."""
