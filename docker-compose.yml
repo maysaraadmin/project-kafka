@@ -49,11 +49,11 @@ services:
       KAFKA_TOPIC: events
       CORS_ORIGINS: "*"
       MAX_PAYLOAD_SIZE: 1048576
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-dev-secret-key-change-in-production-1234567890}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       JWT_ACCESS_TOKEN_EXPIRE_MINUTES: ${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-1440}
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-change-me-in-production}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-dev-password-change-in-production}
     volumes:
       - ./backend:/app
     deploy:

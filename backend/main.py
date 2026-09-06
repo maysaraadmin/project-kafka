@@ -46,11 +46,11 @@ class Settings(BaseSettings):
     max_payload_size: int = 1024 * 1024
     kafka_max_request_size: int = 5 * 1024 * 1024
     kafka_fetch_max_bytes: int = 5 * 1024 * 1024
-    jwt_secret_key: str = "change-me-in-production"
+    jwt_secret_key: str = "dev-secret-key-change-in-production-1234567890"
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 1440
     admin_username: str = "admin"
-    admin_password: str = "change-me-in-production"
+    admin_password: str = "dev-password-change-in-production"
     admin_password_hash: str = ""
     metrics_trusted_ips: str = ""
 
