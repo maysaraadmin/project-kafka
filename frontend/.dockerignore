@@ -1,0 +1,10 @@
+node_modules
+build
+.git
+__pycache__
+.env*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.vercel
+*.log

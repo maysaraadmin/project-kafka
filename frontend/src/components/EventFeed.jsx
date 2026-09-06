@@ -29,7 +29,7 @@ export function EventFeed({ events }) {
           itemSize={ROW_HEIGHT}
           width="100%"
           overscanCount={5}
-          itemKey={(index, data) => data[index]._clientId}
+          itemKey={(index) => events[index]._clientId}
         >
           {({ index, style }) => {
             const ev = events[index];
