@@ -157,15 +157,7 @@ services:
       kafka-3:
         condition: service_healthy
     entrypoint: /bin/sh
-    command: -c "
-      echo 'Waiting for Kafka to be ready...';
-      sleep 30;
-      echo 'Creating topics...';
-      kafka-topics --bootstrap-server kafka-1:9092 --create --if-not-exists --topic events --partitions 6 --replication-factor 3 --config retention.ms=604800000 --config segment.bytes=1073741824;
-      kafka-topics --bootstrap-server kafka-1:9092 --create --if-not-exists --topic events --partitions 6 --replication-factor 3 --config retention.ms=604800000 --config segment.bytes=1073741824;
-      echo 'Topics created';
-      kafka-topics --bootstrap-server kafka-1:9092 --list;
-    "
+    command: -c 'echo "Waiting for Kafka to be ready..."; sleep 30; echo "Creating topics..."; kafka-topics --bootstrap-server kafka-1:9092 --create --if-not-exists --topic events --partitions 6 --replication-factor 3 --config retention.ms=604800000 --config segment.bytes=1073741824; kafka-topics --bootstrap-server kafka-1:9092 --create --if-not-exists --topic events --partitions 6 --replication-factor 3 --config retention.ms=604800000 --config segment.bytes=1073741824; echo "Topics created"; kafka-topics --bootstrap-server kafka-1:9092 --list'
     networks:
       - kafka-net
 

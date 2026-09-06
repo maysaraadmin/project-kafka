@@ -4,48 +4,60 @@
 
 - Docker Engine 24+
 - Docker Compose v2+
-- 2 CPU cores, 4GB RAM minimum
+- 8 CPU cores, 16GB RAM minimum (production Kafka cluster)
 - A reverse proxy (nginx, Caddy, or cloud LB) for TLS termination
+
+## Production Architecture
+
+The production stack runs a **3-broker Kafka cluster** with:
+
+- **Replication factor**: 3 (data survives 2 broker failures)
+- **Min ISR**: 2 (writes require 2 replicas to confirm)
+- **Idempotent producer**: Exactly-once semantics, no duplicates
+- **Manual consumer commits**: Precise offset control
+- **Topic auto-create disabled**: Explicit provisioning required
+- **Resource limits**: Each broker limited to 4GB RAM / 1 CPU
 
 ## Production Checklist
 
 1. **Copy and edit environment variables**
-   ```bash
-   cp .env.example .env
-   # Update CORS_ORIGINS, MAX_PAYLOAD_SIZE, etc.
-   ```
+    ```bash
+    cp .env.example .env
+    # Update JWT_SECRET_KEY, ADMIN_PASSWORD, CORS_ORIGINS, etc.
+    ```
 
-2. **Use production Compose override**
-   ```bash
-   docker-compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
-   ```
+2. **Provision Kafka topics before first deploy**
+    ```bash
+    bash scripts/provision-kafka.sh
+    ```
 
-   This binds ports to `127.0.0.1` and enables persistent Kafka volumes.
+3. **Start the production stack**
+    ```bash
+    docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
+    ```
 
-3. **Enable TLS**
-   - For local HTTPS testing, run `bash scripts/generate-certs.sh` and mount `./ssl` into the frontend container.
-   - In production, terminate TLS at your reverse proxy (nginx, Caddy, cloud LB).
-   - For Kafka, enable `SSL` listener and set `security.inter.broker.protocol=SSL`.
-   - Example nginx SSL config: `frontend/nginx.ssl.conf`
+4. **Verify cluster health**
+    ```bash
+    docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
+    # All kafka-1, kafka-2, kafka-3 should show "healthy"
+    ```
 
-4. **Restrict CORS**
-   Set `CORS_ORIGINS` to your actual frontend domain(s).
+5. **Enable TLS**
+    - Terminate TLS at your reverse proxy (nginx, Caddy, cloud LB).
+    - For Kafka inter-broker communication, configure `SSL` listener and set `security.inter.broker.protocol=SSL`.
+    - Example nginx SSL config: `frontend/nginx.ssl.conf`
 
-5. **Add authentication**
-   - Reverse proxy: require auth before forwarding to `api:8000`.
-   - Or integrate JWT/OAuth2 in FastAPI and pass tokens from the frontend.
+6. **Restrict CORS**
+    Set `CORS_ORIGINS` to your actual frontend domain(s).
 
-6. **Configure log shipping**
-   - Forward stdout/stderr to your log aggregator (ELK, Loki, Datadog).
-   - `structlog` already emits JSON; configure your collector to parse it.
+7. **Monitor**
+    - Scrape `/metrics` with Prometheus.
+    - Set alerts on `events_published` rate drops, `ws_errors` spikes, and consumer lag.
+    - Monitor broker health via JMX or Confluent Control Center.
 
-7. **Back up Kafka data**
-   - The production override mounts `kafka_data` and `zookeeper_data` volumes.
-   - Periodically snapshot these volumes or use Kafka MirrorMaker for cross-cluster replication.
-
-8. **Monitor**
-   - Scrape `/metrics` with Prometheus.
-   - Set alerts on `events_published` rate drops, `ws_errors` spikes, and consumer lag.
+8. **Back up Kafka data**
+    - The production override mounts persistent volumes for each broker.
+    - Periodically snapshot these volumes or use Kafka MirrorMaker for cross-cluster replication.
 
 ## Kubernetes
 
@@ -54,3 +66,15 @@ For K8s deployment:
 - Use `StatefulSet` for Kafka with `volumeClaimTemplates`.
 - Mount `ConfigMap` for environment variables.
 - Use `Ingress` with TLS for the frontend and API.
+
+## Disaster Recovery
+
+If Kafka metadata becomes corrupted:
+
+```bash
+# Nuclear option: reset all data
+make docker-reset
+
+# Or just reset the events topic
+make kafka-reset
+```
