@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import secrets
 import threading
 import time
 from collections import defaultdict
@@ -9,6 +10,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
+import bcrypt
 import jwt
 import structlog
 from fastapi import (
@@ -49,6 +51,7 @@ class Settings(BaseSettings):
     jwt_access_token_expire_minutes: int = 1440
     admin_username: str = "admin"
     admin_password: str = "change-me-in-production"
+    admin_password_hash: str = ""
     metrics_trusted_ips: str = ""
 
     model_config = SettingsConfigDict(env_prefix="", case_sensitive=False)
@@ -60,11 +63,18 @@ class Settings(BaseSettings):
             raise ValueError("kafka_bootstrap_servers must not be empty")
         return v
 
-    @field_validator("jwt_secret_key", "admin_password")
+    @field_validator("jwt_secret_key", "admin_password", "admin_password_hash")
     @classmethod
     def _reject_default_secrets(cls, v: str, info: ValidationInfo) -> str:
-        if os.getenv("ENV", "dev") == "production" and v == "change-me-in-production":
-            raise ValueError(f"{info.field_name} must be set to a strong secret in production")
+        if v == "change-me-in-production":
+            raise ValueError(f"{info.field_name} must be set to a strong secret")
+        return v
+
+    @field_validator("admin_password_hash")
+    @classmethod
+    def _validate_bcrypt_hash(cls, v: str) -> str:
+        if v and not v.startswith("$2"):
+            raise ValueError("admin_password_hash must be a valid bcrypt hash")
         return v
 
     @property
@@ -115,6 +125,7 @@ class ThreadSafeMetrics:
         self._data: defaultdict[str, int] = defaultdict(int)
         self._data["events_published"] = 0
         self._data["events_broadcast"] = 0
+        self._data["events_dropped"] = 0
         self._data["ws_errors"] = 0
         self._lock = threading.Lock()
 
@@ -288,19 +299,23 @@ def start_consumer(
                 fetch_max_bytes=settings.kafka_fetch_max_bytes,
                 value_deserializer=lambda m: json.loads(m.decode("utf-8")),
             )
-            for msg in consumer:
-                if stop_event.is_set():
-                    break
-                asyncio.run_coroutine_threadsafe(safe_put(queue, msg.value), loop)
+            while not stop_event.is_set():
+                msg_pack = consumer.poll(timeout_ms=1000, max_records=50)
+                if not msg_pack:
+                    continue
+                for messages in msg_pack.values():
+                    for msg in messages:
+                        if stop_event.is_set():
+                            break
+                        asyncio.run_coroutine_threadsafe(safe_put(queue, msg.value), loop)
             retry_delay = settings.consumer_retry_delay
         except (KafkaError, ConnectionError, OSError) as e:
             logger.warning("consumer.retryable_error", error=str(e))
             time.sleep(retry_delay)
             retry_delay = min(retry_delay * 2, 60)
         except Exception as e:
-            logger.error("consumer.fatal_error", error=str(e))
-            time.sleep(retry_delay)
-            retry_delay = min(retry_delay * 2, 60)
+            logger.error("consumer.unexpected_error", error=str(e), exc_info=True)
+            raise
         finally:
             if consumer is not None:
                 try:
@@ -374,7 +389,16 @@ class LoginRequest(BaseModel):
 @app.post("/auth/login")
 async def login(request: LoginRequest) -> dict[str, str]:
     """Authenticate and return a JWT access token."""
-    if request.username != settings.admin_username or request.password != settings.admin_password:
+    username_match = secrets.compare_digest(request.username, settings.admin_username)
+    password_match = False
+    if settings.admin_password_hash:
+        password_match = bcrypt.checkpw(
+            request.password.encode("utf-8"),
+            settings.admin_password_hash.encode("utf-8"),
+        )
+    else:
+        password_match = secrets.compare_digest(request.password, settings.admin_password)
+    if not username_match or not password_match:
         raise HTTPException(status_code=401, detail="Invalid credentials")
     token = create_access_token({"sub": request.username})
     return {"access_token": token, "token_type": "bearer"}

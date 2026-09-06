@@ -1,7 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { WS_URL } from '../utils/helpers';
 
-const RECONNECT_DELAY = 3000;
+const RECONNECT_BASE_DELAY = 3000;
+const RECONNECT_MAX_DELAY = 30000;
+
+function getReconnectDelay(attempt) {
+  const exponential = Math.min(RECONNECT_BASE_DELAY * Math.pow(2, attempt), RECONNECT_MAX_DELAY);
+  const jitter = Math.random() * 1000;
+  return exponential + jitter;
+}
 
 function buildUrl(token) {
   const sep = WS_URL.includes('?') ? '&' : '?';
@@ -14,6 +21,7 @@ export function useWebSocket(onMessage, token) {
   const wsRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
   const mountedRef = useRef(true);
+  const reconnectAttemptRef = useRef(0);
 
   const connect = useCallback(() => {
     if (!token) {
@@ -34,6 +42,7 @@ export function useWebSocket(onMessage, token) {
     ws.onopen = () => {
       setConnected(true);
       setError(null);
+      reconnectAttemptRef.current = 0;
     };
 
     ws.onmessage = (event) => {
@@ -52,7 +61,10 @@ export function useWebSocket(onMessage, token) {
     ws.onclose = () => {
       setConnected(false);
       if (mountedRef.current && token) {
-        reconnectTimeoutRef.current = setTimeout(connect, RECONNECT_DELAY);
+        const attempt = reconnectAttemptRef.current;
+        reconnectAttemptRef.current = attempt + 1;
+        const delay = getReconnectDelay(attempt);
+        reconnectTimeoutRef.current = setTimeout(connect, delay);
       }
     };
   }, [onMessage, token]);
