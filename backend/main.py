@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     kafka_fetch_max_bytes: int = 5 * 1024 * 1024
     jwt_secret_key: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 1440
     admin_username: str = "admin"
     admin_password: str = "change-me-in-production"
     metrics_trusted_ips: str = ""
@@ -138,7 +139,7 @@ security = HTTPBearer(auto_error=False)
 def create_access_token(data: dict[str, Any]) -> str:
     """Create a JWT access token."""
     to_encode = data.copy()
-    exp = datetime.now(timezone.utc).timestamp() + 3600
+    exp = datetime.now(timezone.utc).timestamp() + settings.jwt_access_token_expire_minutes * 60
     to_encode.update({"exp": exp})
     token: str = jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
     return token
