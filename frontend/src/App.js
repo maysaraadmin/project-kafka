@@ -102,6 +102,9 @@ function App() {
             disabled={loginLoading}
             style={{ padding: `${theme.spacing.sm} ${theme.spacing.md}`, border: `1px solid ${theme.colors.gray[200]}`, borderRadius: theme.radii.sm, fontSize: theme.typography.fontSize.base }}
           />
+          <div style={{ fontSize: theme.typography.fontSize.xs, color: theme.colors.gray[500] }}>
+            Default: admin / dev-password-change-in-production
+          </div>
           <button
             type="submit"
             disabled={loginLoading}
